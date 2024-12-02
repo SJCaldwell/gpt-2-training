@@ -1,1 +1,2 @@
-setup_storage.sh
+data/
+__pycache__
