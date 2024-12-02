@@ -1,0 +1,17 @@
+{
+    "project_name": "traingpt-test",
+    "experiment_name": "initial-test",
+    "learning_rate": 3e-4,
+    "batch_size": 4,
+    "grad_accum_steps": 1,
+    "max_steps": 1000,
+    "warmup_steps": 100,
+    "eval_every": 500,
+    "save_every": 1000,
+    "optimizer": "adamw",
+    "weight_decay": 0.1,
+    "grad_clip": 1.0,
+    "train_path": "data/processed/train.pt",
+    "mixed_precision": true,
+    "seed": 42
+}
