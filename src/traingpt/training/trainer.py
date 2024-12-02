@@ -3,9 +3,10 @@ from typing import Dict
 
 import torch
 import torch.nn as nn
-import wandb
 from accelerate import Accelerator
 from tqdm.auto import tqdm
+
+import wandb
 
 from ..config.training_config import TrainingConfig
 from .metrics import TrainingMetrics
@@ -25,6 +26,18 @@ class Trainer:
         self.accelerator = accelerator
         self.output_dir = output_dir
         self.step = 0
+
+        if self.accelerator.is_main_process:
+            wandb.init(
+                project=train_config.project_name,
+                name=train_config.experiment_name,
+                config={
+                    "model_config": model.config.__dict__
+                    if hasattr(model, "config")
+                    else {},
+                    "train_config": train_config.model_dump(),
+                },
+            )
 
         # Initialize metrics tracker
         self.metrics = TrainingMetrics()
@@ -57,8 +70,8 @@ class Trainer:
     def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         """Single training step"""
         # Get inputs and targets
-        input_ids = batch["input_ids"]
-        targets = batch["labels"]
+        input_ids = batch["input_ids"].to(self.accelerator.device)
+        targets = batch["labels"].to(self.accelerator.device)
 
         # Forward pass
         with self.accelerator.accumulate(self.model):
@@ -99,8 +112,8 @@ class Trainer:
         total_metrics = {}
 
         for batch in eval_dataloader:
-            input_ids = batch["input_ids"]
-            targets = batch["labels"]
+            input_ids = batch["input_ids"].to(self.accelerator.device)
+            targets = batch["labels"].to(self.accelerator.device)
 
             logits = self.model(input_ids)
             shift_logits = logits[..., :-1, :].contiguous()

@@ -1,97 +1,93 @@
-from datetime import datetime
+import logging
 from pathlib import Path
+from typing import Optional
 
+import torch
 import typer
-import wandb
 from accelerate import Accelerator
-from accelerate.logging import get_logger
-from accelerate.utils import set_seed
-from rich.console import Console
 
 from traingpt.config.model_config import GPT_CONFIG_124M, GPT2Config
 from traingpt.config.training_config import TrainingConfig
-from traingpt.data.dataset import GPTDataset
+from traingpt.data.dataset import create_dataloaders
 from traingpt.model.gpt2 import GPT2
 from traingpt.training.trainer import Trainer
 
-console = Console()
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
+
+
+def get_accelerator_config(train_config: TrainingConfig) -> dict:
+    """Configure accelerator based on available hardware"""
+    if not torch.cuda.is_available() and not torch.backends.mps.is_available():
+        # CPU only - no mixed precision
+        logger.info("Running on CPU - disabling mixed precision")
+        return {"mixed_precision": "no"}
+
+    if torch.cuda.is_available():
+        # NVIDIA GPU - can use mixed precision
+        logger.info("Running on CUDA - enabling mixed precision")
+        return {"mixed_precision": "fp16" if train_config.mixed_precision else "no"}
+
+    if torch.backends.mps.is_available():
+        # Apple Silicon - use default precision
+        logger.info("Running on MPS - using default precision")
+        return {"mixed_precision": "no"}
+
+    return {"mixed_precision": "no"}
 
 
 def train(
-    model_config_path: Path = typer.Argument(..., help="Path to model config JSON"),
-    train_config_path: Path = typer.Argument(..., help="Path to training config JSON"),
-    output_dir: Path = typer.Option(Path("outputs"), help="Base output directory"),
+    train_config_path: Path = typer.Option(
+        ..., "--train-config", "-t", help="Path to training config JSON"
+    ),
+    model_config_path: Optional[Path] = typer.Option(
+        None,
+        "--model-config",
+        "-m",
+        help="Path to model config JSON. If not provided, uses GPT_CONFIG_124M",
+    ),
+    output_dir: Path = typer.Option(
+        "outputs", "--output-dir", "-o", help="Directory for checkpoints and logs"
+    ),
 ) -> None:
-    """Train a GPT model with specified configs"""
+    """Train a GPT model using config files"""
 
     # Load configs
-    if not model_config_path.exists():
-        model_config = GPT_CONFIG_124M
-    else:
-        model_config = GPT2Config.load(model_config_path)
+    model_config = (
+        GPT2Config.load(model_config_path)
+        if model_config_path is not None
+        else GPT_CONFIG_124M
+    )
     train_config = TrainingConfig.load(train_config_path)
 
-    # Setup accelerator
+    # Setup accelerator based on hardware
+    accelerator_config = get_accelerator_config(train_config)
     accelerator = Accelerator(
-        mixed_precision="fp16" if train_config.mixed_precision else "no",
-        gradient_accumulation_steps=train_config.grad_accum_steps,
+        gradient_accumulation_steps=train_config.grad_accum_steps, **accelerator_config
     )
 
-    # Set random seed
-    set_seed(train_config.seed)
+    # Log device info
+    logger.info(f"Using device: {accelerator.device}")
+    if torch.cuda.is_available():
+        logger.info(f"CUDA device: {torch.cuda.get_device_name()}")
 
-    # Initialize wandb on main process only
-    if accelerator.is_main_process:
-        # Generate run name if not provided
-        if not train_config.experiment_name:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            train_config.experiment_name = (
-                f"gpt2_{model_config.embedding_dim}_{timestamp}"
-            )
-
-        # Create output directory
-        run_dir = output_dir / train_config.experiment_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-        # Save configs
-        model_config.save(run_dir / "model_config.json")
-        train_config.save(run_dir / "train_config.json")
-
-        # Start wandb run
-        wandb.init(
-            project=train_config.project_name,
-            name=train_config.experiment_name,
-            tags=train_config.tags,
-            config={
-                "model": model_config.to_dict(),
-                "training": train_config.to_dict(),
-            },
-        )
-
-    # Initialize model and dataset
+    # Initialize model
     model = GPT2(model_config)
-    dataset = GPTDataset(data_path=train_config.train_path)
+
+    # Create dataloaders
+    train_loader, val_loader = create_dataloaders(
+        config=train_config, batch_size=train_config.batch_size
+    )
 
     # Initialize trainer
     trainer = Trainer(
         model=model,
         train_config=train_config,
         accelerator=accelerator,
-        output_dir=run_dir,
+        output_dir=output_dir,
     )
 
     # Train
-    try:
-        trainer.train(dataset)
-    except Exception as e:
-        logger.error(f"Training failed: {e}")
-        if accelerator.is_main_process:
-            wandb.finish(exit_code=1)
-        raise
-
-    # Finish wandb run
-    if accelerator.is_main_process:
-        wandb.finish()
+    trainer.train(train_loader, val_loader)
 
 
 if __name__ == "__main__":

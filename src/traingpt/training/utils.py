@@ -13,31 +13,41 @@ def create_optimizer(
     model: nn.Module, optimizer_name: str, lr: float, weight_decay: float
 ) -> Optimizer:
     """Create optimizer with proper weight decay handling"""
-    # Separate parameters that should and shouldn't use weight decay
+    # Split parameters into weight decay and no weight decay groups
     decay = set()
     no_decay = set()
+    whitelist_weight_modules = (torch.nn.Linear, torch.nn.Embedding)
 
     for mn, m in model.named_modules():
-        for pn, p in m.named_parameters():
+        for pn, p in m.named_parameters(recurse=False):  # Only immediate parameters
             fpn = f"{mn}.{pn}" if mn else pn  # Full param name
+
+            # Skip if not a parameter of this module
+            if not p.requires_grad:
+                continue
 
             if pn.endswith("bias"):
                 no_decay.add(fpn)
-            elif pn.endswith("weight") and isinstance(m, (nn.Linear, nn.Embedding)):
+            elif pn.endswith("weight") and isinstance(m, whitelist_weight_modules):
                 decay.add(fpn)
             else:
                 no_decay.add(fpn)
 
-    # Validate all params are accounted for
-    param_dict = {pn: p for pn, p in model.named_parameters()}
+    # Validate parameters
+    param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
     inter_params = decay & no_decay
     union_params = decay | no_decay
-    assert (
-        len(inter_params) == 0
-    ), f"Parameters {inter_params} made it into both decay/no_decay sets!"
-    assert (
-        len(param_dict.keys() - union_params) == 0
-    ), f"Parameters {param_dict.keys() - union_params} were not separated into decay/no_decay set!"
+
+    if len(param_dict.keys() - union_params) > 0:
+        missing_params = param_dict.keys() - union_params
+        raise ValueError(
+            f"Some parameters are missing from decay/no_decay sets: {missing_params}"
+        )
+
+    if len(inter_params) > 0:
+        raise ValueError(
+            f"Some parameters appear in both decay/no_decay sets: {inter_params}"
+        )
 
     # Create optimizer groups
     optim_groups = [
