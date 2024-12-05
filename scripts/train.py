@@ -1,11 +1,10 @@
+import argparse
 import logging
 from pathlib import Path
 from typing import Optional
 
 import torch
-import typer
 from accelerate import Accelerator
-
 from traingpt.config.model_config import GPT_CONFIG_124M, GPT2Config
 from traingpt.config.training_config import TrainingConfig
 from traingpt.data.dataset import create_dataloaders
@@ -36,18 +35,9 @@ def get_accelerator_config(train_config: TrainingConfig) -> dict:
 
 
 def train(
-    train_config_path: Path = typer.Option(
-        ..., "--train-config", "-t", help="Path to training config JSON"
-    ),
-    model_config_path: Optional[Path] = typer.Option(
-        None,
-        "--model-config",
-        "-m",
-        help="Path to model config JSON. If not provided, uses GPT_CONFIG_124M",
-    ),
-    output_dir: Path = typer.Option(
-        "outputs", "--output-dir", "-o", help="Directory for checkpoints and logs"
-    ),
+    train_config_path: Path,
+    model_config_path: Optional[Path] = None,
+    output_dir: Path = Path("outputs"),
 ) -> None:
     """Train a GPT model using config files"""
 
@@ -91,4 +81,28 @@ def train(
 
 
 if __name__ == "__main__":
-    typer.run(train)
+    parser = argparse.ArgumentParser(description="Train a GPT model")
+    parser.add_argument(
+        "--train-config", "-t",
+        type=Path,
+        required=True,
+        help="Path to training config JSON"
+    )
+    parser.add_argument(
+        "--model-config", "-m",
+        type=Path,
+        help="Path to model config JSON. If not provided, uses GPT_CONFIG_124M"
+    )
+    parser.add_argument(
+        "--output-dir", "-o",
+        type=Path,
+        default=Path("outputs"),
+        help="Directory for checkpoints and logs"
+    )
+    
+    args = parser.parse_args()
+    train(
+        train_config_path=args.train_config,
+        model_config_path=args.model_config,
+        output_dir=args.output_dir
+    )

@@ -69,6 +69,10 @@ class Trainer:
 
     def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
         """Single training step"""
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            initial_memory = torch.cuda.memory_allocated()
+
         # Get inputs and targets
         input_ids = batch["input_ids"].to(self.accelerator.device)
         targets = batch["labels"].to(self.accelerator.device)
@@ -76,6 +80,12 @@ class Trainer:
         # Forward pass
         with self.accelerator.accumulate(self.model):
             logits = self.model(input_ids)
+
+            # Track memory after forward pass
+            if torch.cuda.is_available() and self.step % 10 == 0:
+                forward_memory = torch.cuda.memory_allocated()
+                print(f"Memory after forward pass: {(forward_memory - initial_memory) / 1024**3:.2f}GB")
+
             # Shift logits and targets for next-token prediction
             shift_logits = logits[..., :-1, :].contiguous()
             shift_targets = targets[..., 1:].contiguous()
@@ -87,6 +97,11 @@ class Trainer:
 
             # Backward pass
             self.accelerator.backward(loss)
+
+            if torch.cuda.is_available() and self.step % 10 == 0:
+                backward_memory = torch.cuda.memory_allocated()
+                print(f"Memory after backward pass: {(backward_memory - initial_memory) / 1024**3:.2f}GB")
+
 
             if self.config.grad_clip > 0:
                 self.accelerator.clip_grad_norm_(
