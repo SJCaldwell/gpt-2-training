@@ -1,6 +1,6 @@
 {
     "project_name": "traingpt-test",
-    "experiment_name": "initial-test",
+    "experiment_name": "memory_test",
     "learning_rate": 3e-4,
     "batch_size": 16,
     "grad_accum_steps": 1,

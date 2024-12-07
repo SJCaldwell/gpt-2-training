@@ -73,7 +73,7 @@ class Trainer:
             torch.cuda.reset_peak_memory_stats()
             initial_memory = torch.cuda.memory_allocated()
 
-        # Get inputs and targets
+        # Get inputs and targets on gpu
         input_ids = batch["input_ids"].to(self.accelerator.device)
         targets = batch["labels"].to(self.accelerator.device)
 
@@ -85,14 +85,13 @@ class Trainer:
             if torch.cuda.is_available() and self.step % 10 == 0:
                 forward_memory = torch.cuda.memory_allocated()
                 print(f"Memory after forward pass: {(forward_memory - initial_memory) / 1024**3:.2f}GB")
+                forward_memory_in_gb = (forward_memory - initial_memory) / 1024**3
+                wandb.log({"memory_after_forward_in_gb": forward_memory_in_gb, "batch_size": input_ids.size(0), "context_length": input_ids.size(1)}, step=self.step)
 
-            # Shift logits and targets for next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_targets = targets[..., 1:].contiguous()
 
             # Calculate loss
             loss = self.criterion(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_targets.view(-1)
+                logits.view(-1, logits.size(-1)), targets.view(-1)
             )
 
             # Backward pass
@@ -101,7 +100,8 @@ class Trainer:
             if torch.cuda.is_available() and self.step % 10 == 0:
                 backward_memory = torch.cuda.memory_allocated()
                 print(f"Memory after backward pass: {(backward_memory - initial_memory) / 1024**3:.2f}GB")
-
+                backward_memory_in_gb = (backward_memory - initial_memory) / 1024**3
+                wandb.log({"memory_after_backward_in_gb": backward_memory_in_gb, "batch_size": input_ids.size(0), "context_length": input_ids.size(1)}, step=self.step)
 
             if self.config.grad_clip > 0:
                 self.accelerator.clip_grad_norm_(
@@ -115,7 +115,7 @@ class Trainer:
         # Calculate metrics
         with torch.no_grad():
             metrics = self.metrics.compute_training_metrics(
-                logits=shift_logits, targets=shift_targets, loss=loss.item()
+                logits=logits, targets=targets, loss=loss.item()
             )
 
         return metrics
@@ -131,15 +131,13 @@ class Trainer:
             targets = batch["labels"].to(self.accelerator.device)
 
             logits = self.model(input_ids)
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_targets = targets[..., 1:].contiguous()
 
             loss = self.criterion(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_targets.view(-1)
+                logits.view(-1, logits.size(-1)), targets.view(-1)
             )
 
             batch_metrics = self.metrics.compute_training_metrics(
-                logits=shift_logits, targets=shift_targets, loss=loss.item()
+                logits=logits, targets=targets, loss=loss.item()
             )
 
             # Accumulate metrics

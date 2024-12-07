@@ -39,12 +39,10 @@ class GPTDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         tokens = self.sequences[idx]
-
-        # Prepare input_ids and labels for casual language modeling
-        # Input is the full sequence
-        input_ids = tokens
-        # Labels are the same as input_ids (predict next token)
-        labels = tokens.clone()
+        # Input is the tokens except the last one
+        input_ids = tokens[:-1]
+        # Labels are all the tokens except the first one
+        labels = tokens[1:]
 
         return {
             "input_ids": input_ids,

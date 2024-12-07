@@ -13,6 +13,10 @@ from traingpt.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
 
+def count_parameters(model: torch.nn.Module) -> int:
+    """Count total trainable parameters in model"""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 def get_accelerator_config(train_config: TrainingConfig) -> dict:
     """Configure accelerator based on available hardware"""
@@ -62,6 +66,9 @@ def train(
 
     # Initialize model
     model = GPT2(model_config)
+    num_params = count_parameters(model)
+    print(f"Model has {num_params:,} trainable parameters")
+
 
     # Create dataloaders
     train_loader, val_loader = create_dataloaders(
